@@ -16,6 +16,7 @@ dist/
 # Jupyter notebooks
 .ipynb_checkpoints/
 *.ipynb
+!notebooks/eda.ipynb
 
 # Data and cache
 *.sqlite3
