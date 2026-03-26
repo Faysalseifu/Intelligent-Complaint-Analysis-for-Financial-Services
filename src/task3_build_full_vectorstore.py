@@ -1,15 +1,17 @@
 import pandas as pd
 import numpy as np
+from typing import cast
 from pathlib import Path
 from tqdm import tqdm
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import chromadb
+from chromadb.api.types import Metadata
 import shutil
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
 PARQUET_PATH = PROJECT_ROOT / "data" / "raw" / "complaint_embeddings.parquet"
 VECTOR_STORE_DIR = PROJECT_ROOT / "vector_store" / "full"
+VECTOR_COLLECTION = "complaints"
 
 # Load parquet
 print("Loading pre-built embeddings...")
@@ -19,24 +21,33 @@ if not PARQUET_PATH.exists():
 df = pd.read_parquet(PARQUET_PATH)
 print(f"Loaded {len(df)} chunks.")
 
+required_columns = {"chunk_text", "embedding"}
+missing_columns = required_columns - set(df.columns)
+if missing_columns:
+    raise ValueError(f"Missing required columns in parquet: {sorted(missing_columns)}")
+
 # Prepare texts and metadatas
 texts = df['chunk_text'].tolist()  # Assuming column name; adjust if different
 # Metadata: exclude embedding and text columns
-metadatas = df[[col for col in df.columns if col not in ['chunk_text', 'embedding']]].to_dict(orient='records')
+raw_metadatas = df[[col for col in df.columns if col not in ['chunk_text', 'embedding']]].to_dict(orient='records')
 
-# Embeddings are pre-computed, so we use a fake embedder for Chroma (it won't re-embed)
-class PrecomputedEmbeddings:
-    def embed_documents(self, texts):
-        # Return pre-computed as list of lists
-        # We assume the 'embedding' column contains the vector (list/array)
-        return df['embedding'].tolist()
-        
-    def embed_query(self, text):
-        # For queries, use actual model
-        actual_embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        return actual_embedder.embed_query(text)
 
-embedder = PrecomputedEmbeddings()
+def _normalize_value(value):
+    if isinstance(value, np.generic):
+        value = value.item()
+    if pd.isna(value):
+        return None
+    if isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+metadatas = cast(list[Metadata], [
+    {str(key): _normalize_value(value) for key, value in metadata.items()}
+    for metadata in raw_metadatas
+])
+embeddings = [np.asarray(vector, dtype=np.float32).tolist() for vector in df["embedding"].tolist()]
+ids = [f"chunk-{idx}" for idx in range(len(texts))]
 
 # Build ChromaDB
 print("Building full ChromaDB index...")
@@ -45,11 +56,17 @@ if VECTOR_STORE_DIR.exists():
     shutil.rmtree(VECTOR_STORE_DIR)
 VECTOR_STORE_DIR.mkdir(parents=True, exist_ok=True)
 
-vectordb = Chroma.from_texts(
-    texts=texts,
-    embedding=embedder,
-    metadatas=metadatas,
-    persist_directory=str(VECTOR_STORE_DIR)
-)
-vectordb.persist()
+client = chromadb.PersistentClient(path=str(VECTOR_STORE_DIR))
+collection = client.get_or_create_collection(name=VECTOR_COLLECTION)
+
+batch_size = 5000
+for start in tqdm(range(0, len(texts), batch_size), desc="Indexing chunks"):
+    end = min(start + batch_size, len(texts))
+    collection.upsert(
+        ids=ids[start:end],
+        documents=texts[start:end],
+        metadatas=metadatas[start:end],
+        embeddings=embeddings[start:end],
+    )
+
 print(f"Full vector store saved to {VECTOR_STORE_DIR}")
