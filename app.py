@@ -16,8 +16,17 @@ from langchain_community.vectorstores import Chroma
 
 PROJECT_ROOT = Path(__file__).parent
 VECTOR_STORE_DIR = PROJECT_ROOT / "vector_store" / "full"
+VECTOR_COLLECTION = "complaints"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 LLM_REPO = "mistralai/Mistral-7B-Instruct-v0.2"
+
+
+qa_chain: Optional[RetrievalQA] = None
+llm: Optional[HuggingFaceHub] = None
+vectordb: Optional[Chroma] = None
+prompt: Optional[PromptTemplate] = None
+runtime_error: Optional[str] = None
+_runtime_initialized = False
 
 
 def _require_token() -> str:
@@ -28,17 +37,21 @@ def _require_token() -> str:
 
 
 def _load_vectorstore() -> Chroma:
-    if not VECTOR_STORE_DIR.exists():
+    if not VECTOR_STORE_DIR.exists() or not any(VECTOR_STORE_DIR.iterdir()):
         raise FileNotFoundError(
-            f"Vector store not found at {VECTOR_STORE_DIR}. Run src/task3_build_full_vectorstore.py first."
+            f"Vector store not found at {VECTOR_STORE_DIR}. "
+            "Build it first with: python src/task3_build_full_vectorstore.py"
         )
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-    return Chroma(persist_directory=str(VECTOR_STORE_DIR), embedding_function=embeddings)
+    return Chroma(
+        collection_name=VECTOR_COLLECTION,
+        persist_directory=str(VECTOR_STORE_DIR),
+        embedding_function=embeddings,
+    )
 
 
-def _build_chain() -> Tuple[RetrievalQA, HuggingFaceHub, Chroma, PromptTemplate]:
+def _build_chain(vectordb: Chroma) -> Tuple[RetrievalQA, HuggingFaceHub, PromptTemplate]:
     _require_token()
-    vectordb = _load_vectorstore()
     llm = HuggingFaceHub(
         repo_id=LLM_REPO,
         model_kwargs={"temperature": 0.35, "max_new_tokens": 512},
@@ -61,10 +74,28 @@ def _build_chain() -> Tuple[RetrievalQA, HuggingFaceHub, Chroma, PromptTemplate]
         return_source_documents=True,
         chain_type_kwargs={"prompt": prompt},
     )
-    return qa_chain, llm, vectordb, prompt
+    return qa_chain, llm, prompt
 
 
-qa_chain, llm, vectordb, prompt = _build_chain()
+def initialize_runtime() -> Optional[str]:
+    global qa_chain, llm, vectordb, prompt, runtime_error, _runtime_initialized
+    if _runtime_initialized:
+        return runtime_error
+    try:
+        vectordb = _load_vectorstore()
+        qa_chain, llm, prompt = _build_chain(vectordb)
+        runtime_error = None
+    except Exception as exc:
+        qa_chain = None
+        llm = None
+        vectordb = None
+        prompt = None
+        runtime_error = (
+            "Runtime not ready: "
+            f"{exc}. Ensure HUGGINGFACEHUB_API_TOKEN is set and the vector store exists."
+        )
+    _runtime_initialized = True
+    return runtime_error
 
 
 def _format_sources(docs: List[Document]) -> str:
@@ -82,6 +113,8 @@ def _format_sources(docs: List[Document]) -> str:
 
 
 def _retrieve_docs(query: str, product_filter: Optional[str]) -> List[Document]:
+    if vectordb is None:
+        raise RuntimeError("Vector store is not initialized.")
     filter_dict: Optional[Dict[str, str]] = None
     if product_filter and product_filter != "All":
         filter_dict = {"product_category": product_filter}
@@ -89,6 +122,8 @@ def _retrieve_docs(query: str, product_filter: Optional[str]) -> List[Document]:
 
 
 def _build_prompt(query: str, docs: List[Document]) -> str:
+    if prompt is None:
+        raise RuntimeError("Prompt is not initialized.")
     context = "\n\n".join(doc.page_content for doc in docs)
     return prompt.format(context=context, question=query)
 
@@ -96,9 +131,19 @@ def _build_prompt(query: str, docs: List[Document]) -> str:
 def chat_generator(message: str, history: List[Tuple[str, str]], product_filter: str):
     history = history or []
     history.append((message, ""))
+    startup_error = initialize_runtime()
+    if startup_error:
+        history[-1] = (message, startup_error)
+        yield history, "**Runtime Error**\n\nCheck token and vector store setup.", ""
+        return
+
     docs = _retrieve_docs(message, product_filter)
     full_prompt = _build_prompt(message, docs)
     answer = ""
+    if llm is None:
+        history[-1] = (message, "Language model is not initialized.")
+        yield history, _format_sources(docs), ""
+        return
     for chunk in llm.stream(full_prompt):
         answer += chunk
         history[-1] = (message, answer)
@@ -111,6 +156,7 @@ def clear_chat():
 
 
 def build_ui():
+    startup_error = initialize_runtime()
     with gr.Blocks(title="CrediTrust Complaint Insights", theme=gr.themes.Soft()) as demo:
         gr.Markdown(
             """
@@ -118,6 +164,8 @@ def build_ui():
             Ask about CFPB complaints. Answers are grounded in retrieved chunks; sources shown below.
             """
         )
+        if startup_error:
+            gr.Markdown(f"**Startup warning:** {startup_error}")
 
         with gr.Row():
             with gr.Column(scale=3):
