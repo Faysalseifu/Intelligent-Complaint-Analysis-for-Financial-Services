@@ -1,0 +1,145 @@
+Intelligent Complaint Analysis for Financial Services
+Final Report
+Date: 2026-01-13
+
+Table of Contents
+1. Executive Summary
+2. Problem Statement and Objectives
+3. Data Assets and Assumptions
+4. System Architecture
+5. Data Preparation and Embedding Strategy
+6. Vector Store Construction (Full Index)
+7. RAG Pipeline Design
+8. Evaluation Methodology and Findings
+9. Interactive UI (Task 4) Walkthrough
+10. Deployment and Operations Guide
+11. Limitations, Risks, and Mitigations
+12. Future Work
+13. References
+
+1. Executive Summary
+This project delivers a Retrieval-Augmented Generation (RAG) system that transforms CFPB-style customer complaints into actionable insights for financial services. The solution ingests pre-computed MiniLM embeddings from a provided parquet file, builds a persistent Chroma vector store, and exposes two user-facing surfaces: (a) a notebook for qualitative evaluation, and (b) a Gradio chat application with streaming answers, source transparency, and product filtering. The language model is Mistral-7B-Instruct served via HuggingFace Hub. The pipeline emphasizes grounded responses, transparent citation of sources, and operational readiness (environment checks, error messaging, and persistence of the vector index).
+
+2. Problem Statement and Objectives
+- Provide concise, evidence-based answers to user questions about consumer financial complaints.
+- Minimize hallucinations by grounding answers in retrieved complaint chunks.
+- Offer qualitative evaluation for reporting and defensibility.
+- Deliver a production-friendly UI with streaming responses, source display, and a clear reset.
+- Fit within time/bandwidth constraints by leveraging pre-built embeddings rather than recomputation.
+
+3. Data Assets and Assumptions
+- Core file: data/raw/complaint_embeddings.parquet containing fields such as chunk_text, embedding (384-dim MiniLM vectors), complaint_id, product_category, issue, etc.
+- Pre-computed embeddings remove the need for online embedding; only queries are embedded at runtime.
+- Vector store location: vector_store/full (persisted Chroma DB built from the parquet file).
+- Users must supply a HuggingFace Hub token (HUGGINGFACEHUB_API_TOKEN) to call Mistral-7B-Instruct.
+
+4. System Architecture
+- Ingestion: Read parquet of pre-computed embeddings.
+- Storage: Persist Chroma vector store on disk for reuse.
+- Retrieval: Embed queries with MiniLM, perform similarity search (top-k=5), optional metadata filter.
+- Generation: Mistral-7B-Instruct via HuggingFace Hub; prompt enforces grounding and brevity.
+- Surfaces: Notebook for evaluation; Gradio Blocks UI for interactive chat with streaming and sources.
+- Dependencies: langchain, langchain-community, langchain-huggingface, chromadb, gradio, huggingface-hub, sentence-transformers, pandas, numpy, tqdm.
+
+5. Data Preparation and Embedding Strategy
+- Source embeddings: Provided externally; no recomputation needed.
+- Texts: chunk_text column used as the retrievable content.
+- Metadata: All columns except chunk_text and embedding retained for transparency and filtering (product_category, issue, complaint_id, etc.).
+- Query embeddings: Generated on-the-fly with sentence-transformers/all-MiniLM-L6-v2.
+- Rationale: MiniLM offers a lightweight, fast embedding suitable for CPU-bound retrieval while preserving semantic quality for complaint narratives.
+
+6. Vector Store Construction (Full Index)
+- Script: src/task3_build_full_vectorstore.py
+- Steps:
+  1) Validate parquet presence at data/raw/complaint_embeddings.parquet.
+  2) Load dataframe; extract texts and metadata; keep pre-computed embedding column.
+  3) Use a precomputed-embeddings wrapper so Chroma ingests provided vectors without recomputation.
+  4) Persist to vector_store/full. Existing directory is cleared before rebuild to avoid index drift.
+- Expected runtime: Large (1.37M chunks possible); run once, then reuse.
+
+7. RAG Pipeline Design
+- File: src/rag_pipeline.py
+- Components:
+  - Embeddings: HuggingFaceEmbeddings(MiniLM) for queries.
+  - Vector store: Chroma persisted store.
+  - Retriever: vectordb.as_retriever(k=5) with optional filter on product_category.
+  - Prompt: Analyst persona; insists on evidence-based, concise answers; fallback when context insufficient.
+  - LLM: HuggingFaceHub wrapper for mistralai/Mistral-7B-Instruct-v0.2, temperature ~0.3–0.35, max_new_tokens ~512.
+- generate_answer(query, filter=None): returns answer and source documents; safeguards if chain or store missing.
+- retrieve_chunks(query, k=5, filter=None): direct retrieval helper for sanity checks.
+
+8. Evaluation Methodology and Findings
+- Notebook: notebooks/03_rag_evaluation.ipynb
+- Procedure:
+  - Load pipeline; ensure HF token, parquet, and vector store are present.
+  - Run a curated set of 8–9 questions spanning credit cards, personal loans, money transfers, savings, mortgages, and temporal trends.
+  - Capture generated answer, top sources (excerpts + metadata), and manual quality score (1–5) with comments.
+  - Export evaluation_table.md for reporting.
+- Scoring rubric (suggested):
+  1 = irrelevant/hallucinated, 2 = partially grounded, 3 = mostly grounded with gaps, 4 = accurate and concise, 5 = fully grounded, insightful, concise.
+- Observed strengths:
+  - Prompt reduces hallucinations; answers are concise.
+  - Source transparency aids trust.
+- Observed gaps (to address later):
+  - No reranking or hybrid search; occasional suboptimal top-5.
+  - Temporal questions rely on chunk content; no explicit time awareness or aggregation.
+
+9. Interactive UI (Task 4) Walkthrough
+- File: app.py
+- Framework: Gradio Blocks (preferred for control and layout).
+- Key features:
+  - Textbox input + Ask button + Enter submit.
+  - Streaming responses via llm.stream, updating chatbot incrementally.
+  - Source panel (Markdown) listing product, issue, complaint_id, and excerpts for top documents.
+  - Product filter dropdown (All, credit card, personal loan, checking/savings, money transfer, mortgage) applied at retrieval time.
+  - Clear button resets chat, sources, and input.
+  - Theme: gr.themes.Soft() with clean layout.
+- Launch: python app.py → http://localhost:7860
+- Pre-run checks: HF token set; vector_store/full exists; requirements installed.
+
+10. Deployment and Operations Guide
+- Prerequisites: Python 3.10+ recommended; ensure adequate disk for vector_store/full; CPU acceptable though GPU improves LLM latency if using larger models.
+- Environment setup: pip install -r requirements.txt
+- Required env var: HUGGINGFACEHUB_API_TOKEN
+- Build vector store (one-time): python src/task3_build_full_vectorstore.py
+- Run evaluation notebook: execute cells in notebooks/03_rag_evaluation.ipynb after setting token.
+- Run UI: python app.py (ports configurable via Gradio launch args if needed).
+- Monitoring: Watch stdout for Chroma load, HF auth, and runtime errors; add logging for production.
+- Security: Keep tokens out of source control; consider .env or secret managers in production.
+
+11. Limitations, Risks, and Mitigations
+- Retrieval quality: Pure semantic search; no BM25/hybrid or reranking. Mitigation: add cross-encoder reranker or hybrid query.
+- Latency: Mistral-7B via HF Hub may be slow or rate-limited. Mitigation: cache results; lower max_new_tokens; consider smaller instruction models or local deployment with GPUs.
+- Context truncation: Prompt uses stuffed context; long contexts could be clipped by model limits. Mitigation: adopt map-reduce or refine chains; reduce k.
+- Temporal reasoning: No explicit time-series features. Mitigation: add date filters or pre-aggregated stats.
+- Data drift: Static embeddings; new complaints require re-indexing. Mitigation: schedule incremental builds.
+- Privacy/compliance: Ensure complaint data handling meets organizational policies; redact PII if present.
+
+12. Future Work
+- Retrieval improvements: hybrid search, reranking, diversity sampling.
+- Better prompts: add citation markers, structured bullet outputs, and guardrails.
+- Evaluation: automated metrics (e.g., retrieval precision on labeled sets), lightweight hallucination checks.
+- Analytics: aggregation endpoints for volume trends by issue/product/state; dashboards.
+- Deployment: containerize app.py with gunicorn/uvicorn + reverse proxy; CI/CD with secrets management.
+- UI polish: add expandable accordions per source, loading spinners, and toast errors for missing token/store.
+
+13. References
+- Mistral-7B-Instruct-v0.2 (HuggingFace Hub)
+- sentence-transformers/all-MiniLM-L6-v2
+- LangChain, ChromaDB, Gradio documentation
+
+Appendix A: Quick Commands
+- Install deps: pip install -r requirements.txt
+- Build vector store: python src/task3_build_full_vectorstore.py
+- Run notebook: open notebooks/03_rag_evaluation.ipynb and execute cells
+- Launch UI: python app.py
+
+Appendix B: Key File Map
+- app.py                         : Gradio chat UI (streaming + sources + filter)
+- src/rag_pipeline.py            : Core RAG retrieval and generation helpers
+- src/task3_build_full_vectorstore.py : Full Chroma index build from parquet
+- notebooks/03_rag_evaluation.ipynb   : Qualitative evaluation runs and table export
+- data/raw/complaint_embeddings.parquet : Pre-built embeddings (external download)
+- vector_store/full              : Persisted Chroma DB
+
+End of Report
