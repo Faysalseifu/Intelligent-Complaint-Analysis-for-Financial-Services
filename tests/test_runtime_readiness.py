@@ -1,3 +1,33 @@
+import sys
+import types
+
+def _install_import_stubs():
+    sys.modules.setdefault("gradio", types.ModuleType("gradio"))
+
+    chains_module = types.ModuleType("langchain.chains")
+    prompts_module = types.ModuleType("langchain.prompts")
+    schema_module = types.ModuleType("langchain.schema")
+    lc_embeddings_module = types.ModuleType("langchain_community.embeddings")
+    lc_llms_module = types.ModuleType("langchain_community.llms")
+    lc_vectorstores_module = types.ModuleType("langchain_community.vectorstores")
+
+    chains_module.RetrievalQA = type("RetrievalQA", (), {})
+    prompts_module.PromptTemplate = type("PromptTemplate", (), {"__init__": lambda self, **kwargs: None})
+    schema_module.Document = type("Document", (), {})
+    lc_embeddings_module.HuggingFaceEmbeddings = type("HuggingFaceEmbeddings", (), {"__init__": lambda self, **kwargs: None})
+    lc_llms_module.HuggingFaceHub = type("HuggingFaceHub", (), {"__init__": lambda self, **kwargs: None})
+    lc_vectorstores_module.Chroma = type("Chroma", (), {"__init__": lambda self, **kwargs: None})
+
+    sys.modules.setdefault("langchain.chains", chains_module)
+    sys.modules.setdefault("langchain.prompts", prompts_module)
+    sys.modules.setdefault("langchain.schema", schema_module)
+    sys.modules.setdefault("langchain_community.embeddings", lc_embeddings_module)
+    sys.modules.setdefault("langchain_community.llms", lc_llms_module)
+    sys.modules.setdefault("langchain_community.vectorstores", lc_vectorstores_module)
+
+
+_install_import_stubs()
+
 import app
 from src import rag_pipeline
 

@@ -20,7 +20,7 @@ RAG chatbot for analyzing CFPB-style financial complaints with source-grounded a
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.11 (recommended for compatibility)
 - Hugging Face token with inference access
 
 Set token:
@@ -74,6 +74,7 @@ pytest -q
 	- `HUGGINGFACEHUB_API_TOKEN`
 4. Ensure `vector_store/full` is present in the Space storage or built during startup workflow
 5. Space will launch using `app.py`
+6. Keep runtime aligned with `runtime.txt` (Python 3.11)
 
 ## Current Release Scope
 
