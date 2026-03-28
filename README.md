@@ -66,6 +66,21 @@ Default local URL: `http://127.0.0.1:7860`
 pytest -q
 ```
 
+## Preflight Checks
+
+Run lightweight readiness checks before deployment or runtime:
+
+```bash
+# CI-safe checks (required files)
+python -m src.preflight --mode ci
+
+# App runtime checks (token + vector store)
+python -m src.preflight --mode app
+
+# Embedding build checks (parquet input)
+python -m src.preflight --mode build
+```
+
 ## Deploy to Hugging Face Spaces (Gradio)
 
 1. Create a new Space (SDK: **Gradio**)
