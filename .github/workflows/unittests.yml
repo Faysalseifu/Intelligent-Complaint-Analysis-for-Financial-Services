@@ -23,6 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Run preflight checks
+        run: |
+          python -m src.preflight --mode ci
+
       - name: Run tests
         run: |
           pytest --maxfail=1 --disable-warnings -q
