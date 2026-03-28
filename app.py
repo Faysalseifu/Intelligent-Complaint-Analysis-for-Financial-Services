@@ -2,100 +2,14 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
 from langchain.schema import Document
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import HuggingFaceHub
-from langchain_community.vectorstores import Chroma
-
-PROJECT_ROOT = Path(__file__).parent
-VECTOR_STORE_DIR = PROJECT_ROOT / "vector_store" / "full"
-VECTOR_COLLECTION = "complaints"
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_REPO = "mistralai/Mistral-7B-Instruct-v0.2"
-
-
-qa_chain: Optional[RetrievalQA] = None
-llm: Optional[HuggingFaceHub] = None
-vectordb: Optional[Chroma] = None
-prompt: Optional[PromptTemplate] = None
-runtime_error: Optional[str] = None
-_runtime_initialized = False
-
-
-def _require_token() -> str:
-    token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-    if not token:
-        raise RuntimeError("Set HUGGINGFACEHUB_API_TOKEN before launching the app.")
-    return token
-
-
-def _load_vectorstore() -> Chroma:
-    if not VECTOR_STORE_DIR.exists() or not any(VECTOR_STORE_DIR.iterdir()):
-        raise FileNotFoundError(
-            f"Vector store not found at {VECTOR_STORE_DIR}. "
-            "Build it first with: python src/task3_build_full_vectorstore.py"
-        )
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-    return Chroma(
-        collection_name=VECTOR_COLLECTION,
-        persist_directory=str(VECTOR_STORE_DIR),
-        embedding_function=embeddings,
-    )
-
-
-def _build_chain(vectordb: Chroma) -> Tuple[RetrievalQA, HuggingFaceHub, PromptTemplate]:
-    _require_token()
-    llm = HuggingFaceHub(
-        repo_id=LLM_REPO,
-        model_kwargs={"temperature": 0.35, "max_new_tokens": 512},
-    )
-
-    prompt_template = (
-        "You are a helpful financial analyst for CrediTrust. "
-        "Answer the question based ONLY on the provided complaint excerpts. "
-        "If the context lacks the answer, say you do not have enough information. "
-        "Be concise, highlight recurring themes, and avoid speculation.\n\n"
-        "Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
-    )
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-
-    retriever = vectordb.as_retriever(search_kwargs={"k": 5})
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": prompt},
-    )
-    return qa_chain, llm, prompt
-
+from src import runtime
 
 def initialize_runtime() -> Optional[str]:
-    global qa_chain, llm, vectordb, prompt, runtime_error, _runtime_initialized
-    if _runtime_initialized:
-        return runtime_error
-    try:
-        vectordb = _load_vectorstore()
-        qa_chain, llm, prompt = _build_chain(vectordb)
-        runtime_error = None
-    except Exception as exc:
-        qa_chain = None
-        llm = None
-        vectordb = None
-        prompt = None
-        runtime_error = (
-            "Runtime not ready: "
-            f"{exc}. Ensure HUGGINGFACEHUB_API_TOKEN is set and the vector store exists."
-        )
-    _runtime_initialized = True
-    return runtime_error
+    return runtime.initialize_runtime()
 
 
 def _format_sources(docs: List[Document]) -> str:
@@ -113,19 +27,21 @@ def _format_sources(docs: List[Document]) -> str:
 
 
 def _retrieve_docs(query: str, product_filter: Optional[str]) -> List[Document]:
-    if vectordb is None:
+    if runtime.vectordb is None:
         raise RuntimeError("Vector store is not initialized.")
+
     filter_dict: Optional[Dict[str, str]] = None
     if product_filter and product_filter != "All":
         filter_dict = {"product_category": product_filter}
-    return vectordb.similarity_search(query, k=5, filter=filter_dict)
+    return runtime.vectordb.similarity_search(query, k=5, filter=filter_dict)
 
 
 def _build_prompt(query: str, docs: List[Document]) -> str:
-    if prompt is None:
+    if runtime.prompt is None:
         raise RuntimeError("Prompt is not initialized.")
+
     context = "\n\n".join(doc.page_content for doc in docs)
-    return prompt.format(context=context, question=query)
+    return runtime.prompt.format(context=context, question=query)
 
 
 def chat_generator(message: str, history: List[Tuple[str, str]], product_filter: str):
@@ -140,11 +56,12 @@ def chat_generator(message: str, history: List[Tuple[str, str]], product_filter:
     docs = _retrieve_docs(message, product_filter)
     full_prompt = _build_prompt(message, docs)
     answer = ""
-    if llm is None:
+    if runtime.llm is None:
         history[-1] = (message, "Language model is not initialized.")
         yield history, _format_sources(docs), ""
         return
-    for chunk in llm.stream(full_prompt):
+
+    for chunk in runtime.llm.stream(full_prompt):
         answer += chunk
         history[-1] = (message, answer)
         yield history, _format_sources(docs), ""
