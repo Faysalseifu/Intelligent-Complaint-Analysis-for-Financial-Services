@@ -32,6 +32,25 @@ runtime_error: Optional[str] = None
 _runtime_initialized = False
 
 
+def _should_autobuild_vectorstore() -> bool:
+    return os.getenv("AUTO_BUILD_VECTORSTORE", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _ensure_vectorstore_available() -> None:
+    if VECTOR_STORE_DIR.exists() and any(VECTOR_STORE_DIR.iterdir()):
+        return
+
+    if not _should_autobuild_vectorstore():
+        raise FileNotFoundError(
+            f"Vector store not found at {VECTOR_STORE_DIR}. "
+            "Build it first with: python src/task3_build_full_vectorstore.py"
+        )
+
+    from src.task3_build_full_vectorstore import build_full_vectorstore
+
+    build_full_vectorstore()
+
+
 def _require_token() -> str:
     token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
     if not token:
@@ -40,11 +59,7 @@ def _require_token() -> str:
 
 
 def _load_vectorstore() -> Chroma:
-    if not VECTOR_STORE_DIR.exists() or not any(VECTOR_STORE_DIR.iterdir()):
-        raise FileNotFoundError(
-            f"Vector store not found at {VECTOR_STORE_DIR}. "
-            "Build it first with: python src/task3_build_full_vectorstore.py"
-        )
+    _ensure_vectorstore_available()
 
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
     return Chroma(

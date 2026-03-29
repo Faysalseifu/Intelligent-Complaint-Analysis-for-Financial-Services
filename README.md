@@ -60,6 +60,12 @@ python app.py
 
 Default local URL: `http://127.0.0.1:7860`
 
+Launch configuration can be controlled with environment variables:
+
+- `SERVER_NAME` (default: `0.0.0.0`)
+- `PORT` or `SERVER_PORT` (default: `7860`)
+- `AUTO_BUILD_VECTORSTORE` (`1` to auto-build from parquet when vector store is missing)
+
 ## Tests
 
 ```bash
@@ -90,6 +96,8 @@ python -m src.preflight --mode build
 4. Ensure `vector_store/full` is present in the Space storage or built during startup workflow
 5. Space will launch using `app.py`
 6. Keep runtime aligned with `runtime.txt` (Python 3.11)
+
+Detailed checklist: see `DEPLOYMENT.md`.
 
 ## Current Release Scope
 
