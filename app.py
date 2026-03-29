@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
@@ -123,7 +124,9 @@ def build_ui():
 
 def main() -> None:
     demo = build_ui()
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    server_name = os.getenv("SERVER_NAME", "0.0.0.0")
+    server_port = int(os.getenv("PORT", os.getenv("SERVER_PORT", "7860")))
+    demo.launch(server_name=server_name, server_port=server_port)
 
 
 if __name__ == "__main__":

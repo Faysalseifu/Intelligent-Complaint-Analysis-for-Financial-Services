@@ -91,3 +91,43 @@ def test_generate_answer_returns_readable_error_when_uninitialized(monkeypatch):
 
     assert "RAG chain not initialized" in result["answer"]
     assert result["sources"] == []
+
+
+def test_app_main_uses_env_port_and_server(monkeypatch):
+    class FakeDemo:
+        def __init__(self):
+            self.called_with = None
+
+        def launch(self, server_name, server_port):
+            self.called_with = (server_name, server_port)
+
+    demo = FakeDemo()
+    monkeypatch.setattr(app, "build_ui", lambda: demo)
+    monkeypatch.setenv("SERVER_NAME", "127.0.0.1")
+    monkeypatch.setenv("PORT", "9999")
+
+    app.main()
+
+    assert demo.called_with == ("127.0.0.1", 9999)
+
+
+def test_runtime_load_vectorstore_autobuilds_when_enabled(monkeypatch):
+    reset_runtime_state()
+    monkeypatch.setenv("AUTO_BUILD_VECTORSTORE", "1")
+    monkeypatch.setattr(runtime, "VECTOR_STORE_DIR", object())
+    monkeypatch.setattr(runtime, "_ensure_vectorstore_available", lambda: None)
+
+    class FakeEmbeddings:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeChroma:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(runtime, "HuggingFaceEmbeddings", FakeEmbeddings)
+    monkeypatch.setattr(runtime, "Chroma", FakeChroma)
+
+    db = runtime._load_vectorstore()
+
+    assert isinstance(db, FakeChroma)
