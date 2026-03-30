@@ -1,6 +1,6 @@
 Intelligent Complaint Analysis for Financial Services
 Final Report
-Date: 2026-01-13
+Date: 2026-03-30
 
 Table of Contents
 1. Executive Summary
@@ -16,6 +16,7 @@ Table of Contents
 11. Limitations, Risks, and Mitigations
 12. Future Work
 13. References
+14. Day-5 Launch Readiness Status
 
 1. Executive Summary
 This project delivers a Retrieval-Augmented Generation (RAG) system that transforms CFPB-style customer complaints into actionable insights for financial services. The solution ingests pre-computed MiniLM embeddings from a provided parquet file, builds a persistent Chroma vector store, and exposes two user-facing surfaces: (a) a notebook for qualitative evaluation, and (b) a Gradio chat application with streaming answers, source transparency, and product filtering. The language model is Mistral-7B-Instruct served via HuggingFace Hub. The pipeline emphasizes grounded responses, transparent citation of sources, and operational readiness (environment checks, error messaging, and persistence of the vector index).
@@ -128,11 +129,25 @@ This project delivers a Retrieval-Augmented Generation (RAG) system that transfo
 - sentence-transformers/all-MiniLM-L6-v2
 - LangChain, ChromaDB, Gradio documentation
 
+14. Day-5 Launch Readiness Status
+- Release target: demo-ready (not full production compliance).
+- Deployment target: Hugging Face Spaces (Gradio SDK).
+- Launch path: precomputed embeddings parquet -> full Chroma vector store -> app startup.
+- Verification artifacts added:
+  - scripts/smoke_test.py (repeatable smoke checks)
+  - scripts/demo_script.md (presenter walkthrough)
+- Day-5 acceptance check:
+  - Fresh install path documented and reproducible.
+  - Runtime readiness checks available (preflight + smoke script).
+  - Basic test suite wired and executable with pytest.
+  - Hosted deployment instructions documented in DEPLOYMENT.md and README.md.
+
 Appendix A: Quick Commands
 - Install deps: pip install -r requirements.txt
 - Build vector store: python src/task3_build_full_vectorstore.py
 - Run notebook: open notebooks/03_rag_evaluation.ipynb and execute cells
 - Launch UI: python app.py
+- Run smoke checks: python scripts/smoke_test.py
 
 Appendix B: Key File Map
 - app.py                         : Gradio chat UI (streaming + sources + filter)
