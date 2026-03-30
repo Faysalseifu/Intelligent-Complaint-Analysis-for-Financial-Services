@@ -108,3 +108,65 @@ This release targets **demo-ready** quality:
 - Deployable Gradio app on Hugging Face Spaces
 
 For production hardening, add stronger evaluation, observability, and stricter security/compliance controls.
+
+## Day 5 Launch-Readiness Checklist
+
+Use this checklist before demo day:
+
+1. Fresh install works:
+
+```bash
+pip install -r requirements.txt
+python -m src.preflight --mode ci
+```
+
+2. Runtime readiness passes:
+
+```bash
+python -m src.preflight --mode app
+```
+
+3. Launch app and validate one happy-path query:
+
+```bash
+python app.py
+```
+
+4. Validate one expected failure path (for example, start without token and confirm clear error).
+
+5. Run tests:
+
+```bash
+pytest -q
+```
+
+## Smoke Test Script
+
+Run automated launch smoke checks:
+
+```bash
+python scripts/smoke_test.py
+```
+
+Optional flags:
+
+- `--skip-app-check` to skip token/vector-store runtime checks
+- `--strict-runtime` to fail hard if runtime checks fail
+
+## Demo Script
+
+Use the presenter runbook in `scripts/demo_script.md` for a consistent walkthrough.
+
+## Known Limitations
+
+- Retrieval uses semantic similarity only (no hybrid BM25 + dense reranking).
+- Hosted LLM latency depends on Hugging Face Inference API availability and rate limits.
+- Temporal trend questions are limited to what appears in retrieved chunks.
+- Fresh data ingestion requires rebuilding the persisted vector store.
+
+## Next Improvements
+
+- Add reranking and optional hybrid retrieval.
+- Add structured evaluation metrics and regression checks.
+- Add lightweight observability (request timings, retrieval diagnostics).
+- Add incremental index update workflow for new complaints.
